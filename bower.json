@@ -6,6 +6,11 @@
     "bower_components",
     "output"
   ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/paf31/purescript-quickserve.git"
+  },
   "dependencies": {
     "purescript-aff": "^3.1.0",
     "purescript-node-http": "^4.0.0",
