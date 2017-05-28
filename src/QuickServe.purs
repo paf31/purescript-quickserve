@@ -1,4 +1,22 @@
-module QuickServe where
+module QuickServe
+  ( class Servable
+  , serveWith
+  , genericServeWith
+  , class IsResponse
+  , encodeResponse
+  , responseType
+  , class IsRequest
+  , decodeRequest
+  , requestType
+  , JSON(..)
+  , Method(..)
+  , GET
+  , POST
+  , PUT
+  , RequestBody(..)
+  , Capture(..)
+  , quickServe
+  ) where
 
 import Prelude
 import Control.Alt ((<|>))
@@ -32,41 +50,13 @@ import Node.Stream (end, onDataString, onEnd, onError, writeString)
 import Node.URL (parse)
 import Type.Proxy (Proxy(..))
 
-class IsResponse response where
-  encodeResponse :: response -> String
-  responseType :: Proxy response -> String
-
-instance isResponseString :: IsResponse String where
-  encodeResponse = id
-  responseType _ = "text/plain"
-
-class IsRequest request where
-  decodeRequest :: String -> Either String request
-  requestType :: Proxy request -> String
-
-instance isRequestString :: IsRequest String where
-  decodeRequest = Right
-  requestType _ = "text/plain"
-
-newtype JSON a = JSON a
-
-derive instance newtypeJSON :: Newtype (JSON a) _
-
-instance isResponseJSON :: Encode a => IsResponse (JSON a) where
-  encodeResponse =
-    encodeResponse
-    <<< encodeJSON
-    <<< unwrap
-  responseType _ = "application/json"
-
-instance isRequestJSON :: Decode a => IsRequest (JSON a) where
-  decodeRequest =
-    bimap (renderForeignError <<< extract) JSON
-    <<< runExcept
-    <<< decodeJSON
-    <=< decodeRequest
-  requestType _ = "application/json"
-
+-- | A type class for types of values which define
+-- | servers.
+-- |
+-- | Servers are built from the `Method` data type, which
+-- | defines the method, record types which define routes
+-- | and function types which make things like the request
+-- | body and query parameters available.
 class Servable eff server | server -> eff where
   serveWith
     :: server
@@ -75,6 +65,21 @@ class Servable eff server | server -> eff where
     -> List String
     -> Maybe (Eff (http :: HTTP | eff) Unit)
 
+-- | Start a web server given some `Servable` type
+-- | and an implementation of that type.
+-- |
+-- | For example:
+-- |
+-- | ```purescript
+-- | opts = { hostname: "localhost"
+-- |        , port: 3000
+-- |        , backlog: Nothing
+-- |        }
+-- |
+-- | main = quickServe opts hello where
+-- |   hello :: GET String
+-- |   hello = pure "Hello, World!""
+-- | ```
 quickServe
   :: forall eff server
    . Servable (console :: CONSOLE | eff) server
@@ -94,6 +99,74 @@ quickServe opts serve = do
       Just s -> s
   listen server opts (pure unit)
 
+-- | A default implementation of `serveWith` for record types
+-- | with derived `Generic` instances.
+-- |
+-- | For example:
+-- |
+-- | ```purescript
+-- | newtype Routes eff = Routes
+-- |   { foo :: GET eff String
+-- |   , bar :: GET eff (JSON Response)
+-- |   }
+-- |
+-- | derive instance genericRoutes :: Generic (Routes eff) _
+-- |
+-- | instance servableRoutes :: Servable eff (Routes eff) where
+-- |   serveWith = genericServeWith
+-- | ```
+genericServeWith
+  :: forall eff routes rep
+   . Generic routes rep
+  => Servable eff rep
+  => routes
+  -> Request
+  -> Response
+  -> List String
+  -> Maybe (Eff (http :: HTTP | eff) Unit)
+genericServeWith = serveWith <<< from
+
+-- | A type class for response data.
+class IsResponse response where
+  encodeResponse :: response -> String
+  responseType :: Proxy response -> String
+
+instance isResponseString :: IsResponse String where
+  encodeResponse = id
+  responseType _ = "text/plain"
+
+-- | A type class for request data.
+class IsRequest request where
+  decodeRequest :: String -> Either String request
+  requestType :: Proxy request -> String
+
+instance isRequestString :: IsRequest String where
+  decodeRequest = Right
+  requestType _ = "text/plain"
+
+-- | A request/response type which uses JSON as its
+-- | data representation.
+newtype JSON a = JSON a
+
+derive instance newtypeJSON :: Newtype (JSON a) _
+
+instance isResponseJSON :: Encode a => IsResponse (JSON a) where
+  encodeResponse =
+    encodeResponse
+    <<< encodeJSON
+    <<< unwrap
+  responseType _ = "application/json"
+
+instance isRequestJSON :: Decode a => IsRequest (JSON a) where
+  decodeRequest =
+    bimap (renderForeignError <<< extract) JSON
+    <<< runExcept
+    <<< decodeJSON
+    <=< decodeRequest
+  requestType _ = "application/json"
+
+-- | A `Servable` type constructor which indicates the expected
+-- | method (GET, POST, PUT, etc.) using a type-level string.
 newtype Method (m :: Symbol) eff response = Method (Aff (http :: HTTP | eff) response)
 
 derive instance newtypeMethod :: Newtype (Method m eff response) _
@@ -106,8 +179,13 @@ derive newtype instance monadMethod :: Monad (Method m eff)
 derive newtype instance monadEffMethod :: MonadEff (http :: HTTP | eff) (Method m eff)
 derive newtype instance monadAffMethod :: MonadAff (http :: HTTP | eff) (Method m eff)
 
+-- | A resource which responds to GET requests.
 type GET = Method "GET"
+
+-- | A resource which responds to POST requests.
 type POST = Method "POST"
+
+-- | A resource which responds to PUT requests.
 type PUT = Method "PUT"
 
 instance servableMethod
@@ -129,6 +207,16 @@ instance servableMethod
       else sendError res 405 "Method not allowed" ("Expected " <> expected)
   serveWith _ _ _ _ = Nothing
 
+-- | `RequestBody` can be used to read the request body.
+-- |
+-- | To read the request body, use a function type with a function
+-- | argument type which has an `IsRequest` instance:
+-- |
+-- | ```purescript
+-- | main = quickServe opts echo where
+-- |   echo :: RequestBody String -> GET String
+-- |   echo (RequestBody s) = pure s
+-- | ```
 newtype RequestBody a = RequestBody a
 
 derive instance newtypeRequestBody :: Newtype (RequestBody a) _
@@ -161,6 +249,27 @@ instance servableRequestBody
       onDataString inputStream UTF8 handleData
       onEnd inputStream handleEnd
 
+-- | `Capture` can be used to capture a part of the route.
+-- |
+-- | Use a function type with a function
+-- | argument of type `Capture`:
+-- |
+-- | ```purescript
+-- | main = quickServe opts echo' where
+-- |   echo' :: Capture -> GET String
+-- |   echo' (Capture s) = pure s
+-- | ```
+newtype Capture = Capture String
+
+derive instance newtypeCapture :: Newtype Capture _
+
+instance servableCapture
+    :: Servable eff service
+    => Servable eff (Capture -> service) where
+  serveWith read req res (part : path) =
+    serveWith (read (Capture part)) req res path
+  serveWith _ _ _ _ = Nothing
+
 sendError
   :: forall eff
    . Response
@@ -178,17 +287,6 @@ sendError res code msg body = do
 
 badRoute :: forall eff. Response -> Eff (http :: HTTP | eff) Unit
 badRoute res = sendError res 400 "Bad Request" "No such route"
-
-genericServeWith
-  :: forall eff routes rep
-   . Generic routes rep
-  => Servable eff rep
-  => routes
-  -> Request
-  -> Response
-  -> List String
-  -> Maybe (Eff (http :: HTTP | eff) Unit)
-genericServeWith = serveWith <<< from
 
 instance servableConstructor
   :: Servable eff server

@@ -10,7 +10,8 @@ import Data.Foreign.Generic.Types (Options)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..))
 import Node.HTTP (HTTP)
-import QuickServe (class Servable, GET, JSON(..), POST, RequestBody(..), genericServeWith, quickServe)
+import QuickServe (class Servable, GET, JSON(..), POST, RequestBody(..),
+                   Capture(..), genericServeWith, quickServe)
 
 newtype Message = Message { message :: String }
 
@@ -26,7 +27,8 @@ instance encodeMessage :: Encode Message where
   encode = genericEncode jsonOpts
 
 newtype Routes eff = Routes
-  { echo :: RequestBody (JSON Message) -> POST (console :: CONSOLE | eff) (JSON Message)
+  { echo1 :: RequestBody (JSON Message) -> POST (console :: CONSOLE | eff) (JSON Message)
+  , echo2 :: Capture -> GET (console :: CONSOLE | eff) String
   , hello :: GET (console :: CONSOLE | eff) String
   }
 
@@ -37,9 +39,10 @@ instance servableRoutes :: Servable (console :: CONSOLE | eff) (Routes eff) wher
 
 server :: forall eff. Routes eff
 server = Routes
-  { echo: \(RequestBody (JSON (Message { message }))) -> do
+  { echo1: \(RequestBody (JSON (Message { message }))) -> do
       liftEff (log message)
       pure (JSON (Message { message }))
+  , echo2: \(Capture message) -> pure message
   , hello: pure "Hello, World!"
   }
 

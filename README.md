@@ -2,13 +2,15 @@
 
 Quickly create HTTP servers from functions!
 
+[Module Documentation](generated-docs/QuickServe.md)
+
 ## Getting Started
 
 A single endpoint which returns plain text:
 
 ```purescript
 server :: GET String
-server = GET (pure "Hello, World!")
+server = pure "Hello, World!"
 
 main = do
   let opts = { hostname: "localhost", port: 3000, backlog: Nothing }
@@ -21,7 +23,7 @@ Use a function argument with type `RequestBody a` to read the request body:
 
 ```purescript
 server :: RequestBody String -> POST String
-server (RequestBody s) = POST (pure s)
+server (RequestBody s) = pure s
 ```
 
 ## JSON
