@@ -7,17 +7,15 @@ data LProxy (l :: RowList)
   = LProxy
 ```
 
-#### `RecordOf`
+#### `get`
 
 ``` purescript
-data RecordOf :: RowList -> Type
+get :: forall l a r1 r2. IsSymbol l => RowCons l a r1 r2 => SProxy l -> {  | r2 } -> a
 ```
 
-#### `unsafeGet`
+Get a property from a record by providing a label as a type-level string.
 
-``` purescript
-unsafeGet :: forall l a r. String -> RecordOf (Cons l a r) -> a
-```
+Note: the `RowCons` constraint makes this operation safe.
 
 #### `rowToList`
 

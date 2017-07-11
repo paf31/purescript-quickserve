@@ -20,7 +20,7 @@ body and query parameters available.
 (IsSymbol method, IsResponse response) => Servable eff (Method method eff response)
 (IsRequest request, Servable eff service) => Servable eff (RequestBody request -> service)
 (Servable eff service) => Servable eff (Capture -> service)
-(RowToList r l, ServableList eff l) => Servable eff ({  | r })
+(RowToList r l, ServableList eff l r) => Servable eff ({  | r })
 ```
 
 #### `quickServe`
@@ -192,14 +192,14 @@ Newtype Capture _
 #### `ServableList`
 
 ``` purescript
-class ServableList eff (l :: RowList)  where
-  serveListWith :: LProxy l -> RecordOf l -> Request -> Response -> List String -> Maybe (Eff (http :: HTTP | eff) Unit)
+class ServableList eff (l :: RowList) (r :: # Type) | l -> r where
+  serveListWith :: LProxy l -> {  | r } -> Request -> Response -> List String -> Maybe (Eff (http :: HTTP | eff) Unit)
 ```
 
 ##### Instances
 ``` purescript
-ServableList eff Nil
-(IsSymbol route, Servable eff s, ServableList eff r) => ServableList eff (Cons route s r)
+ServableList eff Nil ()
+(IsSymbol route, Servable eff s, ServableList eff l r1, RowCons route s r1 r) => ServableList eff (Cons route s l) r
 ```
 
 

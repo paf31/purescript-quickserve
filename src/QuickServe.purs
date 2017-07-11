@@ -48,7 +48,7 @@ import Node.Encoding (Encoding(..))
 import Node.HTTP (HTTP, ListenOptions, Request, Response, createServer, listen, requestAsStream, requestMethod, requestURL, responseAsStream, setHeader, setStatusCode, setStatusMessage)
 import Node.Stream (end, onDataString, onEnd, onError, writeString)
 import Node.URL (parse)
-import QuickServe.Internal (LProxy(..), RecordOf, rowToList, unsafeGet)
+import QuickServe.Internal (LProxy(..), get, rowToList)
 import Type.Proxy (Proxy(..))
 import Type.Row (class RowToList, Cons, Nil, kind RowList)
 import Unsafe.Coerce (unsafeCoerce)
@@ -264,25 +264,25 @@ sendError res code msg body = do
 badRoute :: forall eff. Response -> Eff (http :: HTTP | eff) Unit
 badRoute res = sendError res 400 "Bad Request" "No such route"
 
-instance servableRecord :: (RowToList r l, ServableList eff l) => Servable eff (Record r) where
-  serveWith r = serveListWith (rowToList r) (unsafeCoerce r)
+instance servableRecord :: (RowToList r l, ServableList eff l r) => Servable eff (Record r) where
+  serveWith r = serveListWith (rowToList r) r
 
-class ServableList eff (l :: RowList) where
+class ServableList eff (l :: RowList) (r :: # Type) | l -> r where
   serveListWith
     :: LProxy l
-    -> RecordOf l
+    -> Record r
     -> Request
     -> Response
     -> List String
     -> Maybe (Eff (http :: HTTP | eff) Unit)
 
-instance servableListNil :: ServableList eff Nil where
+instance servableListNil :: ServableList eff Nil () where
   serveListWith _ _ _ _ _ = Nothing
 
 instance servableListCons
-  :: (IsSymbol route, Servable eff s, ServableList eff r)
-  => ServableList eff (Cons route s r) where
+  :: (IsSymbol route, Servable eff s, ServableList eff l r1, RowCons route s r1 r)
+  => ServableList eff (Cons route s l) r where
   serveListWith _ rec req res (actual : xs)
     | actual == reflectSymbol (SProxy :: SProxy route)
-    = serveWith (unsafeGet (reflectSymbol (SProxy :: SProxy route)) rec :: s) req res xs
-  serveListWith _ rec req res xs = serveListWith (LProxy :: LProxy r) (unsafeCoerce rec) req res xs
+    = serveWith (get (SProxy :: SProxy route) rec :: s) req res xs
+  serveListWith _ rec req res xs = serveListWith (LProxy :: LProxy l) (unsafeCoerce rec) req res xs
