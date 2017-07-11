@@ -25,6 +25,19 @@ instance decodeMessage :: Decode Message where
 instance encodeMessage :: Encode Message where
   encode = genericEncode jsonOpts
 
+-- | This will serve three endpoints:
+-- |
+-- | - `/hello`, which returns the plain text string "Hello World!"
+-- | - `/echo1`, which receives a JSON message in a POST body
+-- | - `/echo2/<arg>`, which receives a plain text message to echo as a path argument
+-- |
+-- | Each of these can be tested with cURL:
+-- |
+-- | ```
+-- | curl http://localhost:3000/hello
+-- | curl http://localhost:3000/echo1 -XPOST -d '{"message": "test"}'
+-- | curl http://localhost:3000/echo2/test
+-- | ```
 main :: forall eff. Eff (console :: CONSOLE, http :: HTTP | eff) Unit
 main = do
   let opts = { hostname: "localhost", port: 3000, backlog: Nothing }
