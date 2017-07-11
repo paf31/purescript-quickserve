@@ -1,7 +1,6 @@
 module QuickServe
   ( class Servable
   , serveWith
-  , genericServeWith
   , class IsResponse
   , encodeResponse
   , responseType
@@ -16,10 +15,12 @@ module QuickServe
   , RequestBody(..)
   , Capture(..)
   , quickServe
+  , class ServableList
+  , serveListWith
   ) where
 
 import Prelude
-import Control.Alt ((<|>))
+
 import Control.Comonad (extract)
 import Control.Monad.Aff (Aff, runAff)
 import Control.Monad.Aff.Class (class MonadAff)
@@ -36,9 +37,8 @@ import Data.Either (Either(..))
 import Data.Foreign (renderForeignError)
 import Data.Foreign.Class (class Decode, class Encode)
 import Data.Foreign.Generic (decodeJSON, encodeJSON)
-import Data.Generic.Rep (class Generic, Constructor(..), Field(..), Product(..), Rec(..), from)
 import Data.List (List(..), fromFoldable, (:))
-import Data.Maybe (Maybe(..), maybe)
+import Data.Maybe (Maybe(Nothing, Just), maybe)
 import Data.Monoid (mempty)
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Nullable (toMaybe)
@@ -48,7 +48,10 @@ import Node.Encoding (Encoding(..))
 import Node.HTTP (HTTP, ListenOptions, Request, Response, createServer, listen, requestAsStream, requestMethod, requestURL, responseAsStream, setHeader, setStatusCode, setStatusMessage)
 import Node.Stream (end, onDataString, onEnd, onError, writeString)
 import Node.URL (parse)
+import QuickServe.Internal (LProxy(..), RecordOf, rowToList, unsafeGet)
 import Type.Proxy (Proxy(..))
+import Type.Row (class RowToList, Cons, Nil, kind RowList)
+import Unsafe.Coerce (unsafeCoerce)
 
 -- | A type class for types of values which define
 -- | servers.
@@ -97,34 +100,7 @@ quickServe opts serve = do
     case serveWith serve req res path of
       Nothing -> badRoute res
       Just s -> s
-  listen server opts (pure unit)
-
--- | A default implementation of `serveWith` for record types
--- | with derived `Generic` instances.
--- |
--- | For example:
--- |
--- | ```purescript
--- | newtype Routes eff = Routes
--- |   { foo :: GET eff String
--- |   , bar :: GET eff (JSON Response)
--- |   }
--- |
--- | derive instance genericRoutes :: Generic (Routes eff) _
--- |
--- | instance servableRoutes :: Servable eff (Routes eff) where
--- |   serveWith = genericServeWith
--- | ```
-genericServeWith
-  :: forall eff routes rep
-   . Generic routes rep
-  => Servable eff rep
-  => routes
-  -> Request
-  -> Response
-  -> List String
-  -> Maybe (Eff (http :: HTTP | eff) Unit)
-genericServeWith = serveWith <<< from
+  listen server opts (log ("Listening on port " <> show (_.port opts)))
 
 -- | A type class for response data.
 class IsResponse response where
@@ -288,26 +264,25 @@ sendError res code msg body = do
 badRoute :: forall eff. Response -> Eff (http :: HTTP | eff) Unit
 badRoute res = sendError res 400 "Bad Request" "No such route"
 
-instance servableConstructor
-  :: Servable eff server
-  => Servable eff (Constructor name server) where
-  serveWith (Constructor s) = serveWith s
+instance servableRecord :: (RowToList r l, ServableList eff l) => Servable eff (Record r) where
+  serveWith r = serveListWith (rowToList r) (unsafeCoerce r)
 
-instance servableRec
-  :: Servable eff server
-  => Servable eff (Rec server) where
-  serveWith (Rec r) = serveWith r
+class ServableList eff (l :: RowList) where
+  serveListWith
+    :: LProxy l
+    -> RecordOf l
+    -> Request
+    -> Response
+    -> List String
+    -> Maybe (Eff (http :: HTTP | eff) Unit)
 
-instance servableProduct
-  :: (Servable eff route1, Servable eff route2)
-  => Servable eff (Product route1 route2) where
-  serveWith (Product r1 r2) req res p =
-    serveWith r1 req res p <|> serveWith r2 req res p
+instance servableListNil :: ServableList eff Nil where
+  serveListWith _ _ _ _ _ = Nothing
 
-instance routableField
-  :: (IsSymbol route, Servable eff server)
-  => Servable eff (Field route server) where
-  serveWith (Field s) req res (actual : xs)
+instance servableListCons
+  :: (IsSymbol route, Servable eff s, ServableList eff r)
+  => ServableList eff (Cons route s r) where
+  serveListWith _ rec req res (actual : xs)
     | actual == reflectSymbol (SProxy :: SProxy route)
-    = serveWith s req res xs
-  serveWith _ _ _ _ = Nothing
+    = serveWith (unsafeGet (reflectSymbol (SProxy :: SProxy route)) rec :: s) req res xs
+  serveListWith _ rec req res xs = serveListWith (LProxy :: LProxy r) (unsafeCoerce rec) req res xs

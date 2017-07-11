@@ -20,10 +20,7 @@ body and query parameters available.
 (IsSymbol method, IsResponse response) => Servable eff (Method method eff response)
 (IsRequest request, Servable eff service) => Servable eff (RequestBody request -> service)
 (Servable eff service) => Servable eff (Capture -> service)
-(Servable eff server) => Servable eff (Constructor name server)
-(Servable eff server) => Servable eff (Rec server)
-(Servable eff route1, Servable eff route2) => Servable eff (Product route1 route2)
-(IsSymbol route, Servable eff server) => Servable eff (Field route server)
+(RowToList r l, ServableList eff l) => Servable eff ({  | r })
 ```
 
 #### `quickServe`
@@ -46,29 +43,6 @@ opts = { hostname: "localhost"
 main = quickServe opts hello where
   hello :: GET String
   hello = pure "Hello, World!""
-```
-
-#### `genericServeWith`
-
-``` purescript
-genericServeWith :: forall eff routes rep. Generic routes rep => Servable eff rep => routes -> Request -> Response -> List String -> Maybe (Eff (http :: HTTP | eff) Unit)
-```
-
-A default implementation of `serveWith` for record types
-with derived `Generic` instances.
-
-For example:
-
-```purescript
-newtype Routes eff = Routes
-  { foo :: GET eff String
-  , bar :: GET eff (JSON Response)
-  }
-
-derive instance genericRoutes :: Generic (Routes eff) _
-
-instance servableRoutes :: Servable eff (Routes eff) where
-  serveWith = genericServeWith
 ```
 
 #### `IsResponse`
@@ -213,6 +187,19 @@ main = quickServe opts echo' where
 ``` purescript
 Newtype Capture _
 (Servable eff service) => Servable eff (Capture -> service)
+```
+
+#### `ServableList`
+
+``` purescript
+class ServableList eff (l :: RowList)  where
+  serveListWith :: LProxy l -> RecordOf l -> Request -> Response -> List String -> Maybe (Eff (http :: HTTP | eff) Unit)
+```
+
+##### Instances
+``` purescript
+ServableList eff Nil
+(IsSymbol route, Servable eff s, ServableList eff r) => ServableList eff (Cons route s r)
 ```
 
 
