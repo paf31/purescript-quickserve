@@ -9,7 +9,7 @@ Quickly create HTTP servers from functions!
 A single endpoint which returns plain text:
 
 ```purescript
-server :: GET String
+server :: forall eff. GET eff String
 server = pure "Hello, World!"
 
 main = do
@@ -22,7 +22,7 @@ main = do
 Use a function argument with type `RequestBody a` to read the request body:
 
 ```purescript
-server :: RequestBody String -> POST String
+server :: forall eff. RequestBody String -> POST eff String
 server (RequestBody s) = pure s
 ```
 
