@@ -33,7 +33,7 @@ import Control.Monad.Eff.Ref.Unsafe (unsafeRunRef)
 import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
 import Control.Monad.Except (runExcept)
 import Data.Bifunctor (bimap)
-import Data.Either (Either(..))
+import Data.Either (Either(..), either)
 import Data.Foreign (renderForeignError)
 import Data.Foreign.Class (class Decode, class Encode)
 import Data.Foreign.Generic (decodeJSON, encodeJSON)
@@ -42,15 +42,15 @@ import Data.Maybe (Maybe(Nothing, Just), maybe)
 import Data.Monoid (mempty)
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Nullable (toMaybe)
+import Data.Record (get)
 import Data.String (split)
 import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
 import Node.Encoding (Encoding(..))
 import Node.HTTP (HTTP, ListenOptions, Request, Response, createServer, listen, requestAsStream, requestMethod, requestURL, responseAsStream, setHeader, setStatusCode, setStatusMessage)
 import Node.Stream (end, onDataString, onEnd, onError, writeString)
 import Node.URL (parse)
-import QuickServe.Internal (LProxy(..), get, rowToList)
 import Type.Proxy (Proxy(..))
-import Type.Row (class RowToList, Cons, Nil, kind RowList)
+import Type.Row (class RowToList, Cons, Nil, RLProxy(..), kind RowList)
 import Unsafe.Coerce (unsafeCoerce)
 
 -- | A type class for types of values which define
@@ -179,7 +179,7 @@ instance servableMethod
     let actual = requestMethod req
         expected = reflectSymbol (SProxy :: SProxy method)
     if actual == expected
-      then void $ runAff handleError handleResponse (unwrap respond)
+      then void $ runAff (either handleError handleResponse) (unwrap respond)
       else sendError res 405 "Method not allowed" ("Expected " <> expected)
   serveWith _ _ _ _ = Nothing
 
@@ -265,11 +265,11 @@ badRoute :: forall eff. Response -> Eff (http :: HTTP | eff) Unit
 badRoute res = sendError res 400 "Bad Request" "No such route"
 
 instance servableRecord :: (RowToList r l, ServableList eff l r) => Servable eff (Record r) where
-  serveWith r = serveListWith (rowToList r) r
+  serveWith r = serveListWith (RLProxy :: RLProxy l) r
 
 class ServableList eff (l :: RowList) (r :: # Type) | l -> r where
   serveListWith
-    :: LProxy l
+    :: RLProxy l
     -> Record r
     -> Request
     -> Response
@@ -285,4 +285,4 @@ instance servableListCons
   serveListWith _ rec req res (actual : xs)
     | actual == reflectSymbol (SProxy :: SProxy route)
     = serveWith (get (SProxy :: SProxy route) rec :: s) req res xs
-  serveListWith _ rec req res xs = serveListWith (LProxy :: LProxy l) (unsafeCoerce rec) req res xs
+  serveListWith _ rec req res xs = serveListWith (RLProxy :: RLProxy l) (unsafeCoerce rec) req res xs

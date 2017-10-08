@@ -193,7 +193,7 @@ Newtype Capture _
 
 ``` purescript
 class ServableList eff (l :: RowList) (r :: # Type) | l -> r where
-  serveListWith :: LProxy l -> {  | r } -> Request -> Response -> List String -> Maybe (Eff (http :: HTTP | eff) Unit)
+  serveListWith :: RLProxy l -> {  | r } -> Request -> Response -> List String -> Maybe (Eff (http :: HTTP | eff) Unit)
 ```
 
 ##### Instances
