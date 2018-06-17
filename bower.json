@@ -12,10 +12,11 @@
     "url": "git://github.com/paf31/purescript-quickserve.git"
   },
   "dependencies": {
-    "purescript-aff": "^4.0.0",
-    "purescript-node-http": "^4.0.0",
-    "purescript-foreign-generic": "^5.0.0",
-    "purescript-typelevel-prelude": "^2.4.0",
-    "purescript-record": "^0.2.3"
+    "purescript-aff": "^5.0.0",
+    "purescript-console": "^4.1.0",
+    "purescript-node-http": "^5.0.0",
+    "purescript-foreign-generic": "^7.0.0",
+    "purescript-typelevel-prelude": "^3.0.0",
+    "purescript-record": "^1.0.0"
   }
 }
