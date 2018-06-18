@@ -3,8 +3,8 @@
 #### `Servable`
 
 ``` purescript
-class Servable eff server | server -> eff where
-  serveWith :: server -> Request -> Response -> List String -> Maybe (Eff (http :: HTTP | eff) Unit)
+class Servable server  where
+  serveWith :: server -> Request -> Response -> List String -> Maybe (Effect Unit)
 ```
 
 A type class for types of values which define
@@ -17,32 +17,10 @@ body and query parameters available.
 
 ##### Instances
 ``` purescript
-(IsSymbol method, IsResponse response) => Servable eff (Method method eff response)
-(IsRequest request, Servable eff service) => Servable eff (RequestBody request -> service)
-(Servable eff service) => Servable eff (Capture -> service)
-(RowToList r l, ServableList eff l r) => Servable eff ({  | r })
-```
-
-#### `quickServe`
-
-``` purescript
-quickServe :: forall eff server. Servable (console :: CONSOLE | eff) server => ListenOptions -> server -> Eff (http :: HTTP, console :: CONSOLE | eff) Unit
-```
-
-Start a web server given some `Servable` type
-and an implementation of that type.
-
-For example:
-
-```purescript
-opts = { hostname: "localhost"
-       , port: 3000
-       , backlog: Nothing
-       }
-
-main = quickServe opts hello where
-  hello :: GET String
-  hello = pure "Hello, World!""
+(IsSymbol method, IsResponse response) => Servable (Method method response)
+(IsRequest request, Servable service) => Servable (RequestBody request -> service)
+(Servable service) => Servable (Capture -> service)
+(RowToList r l, ServableList l r) => Servable {  | r }
 ```
 
 #### `IsResponse`
@@ -97,8 +75,8 @@ Newtype (JSON a) _
 #### `Method`
 
 ``` purescript
-newtype Method (m :: Symbol) eff response
-  = Method (Aff (http :: HTTP | eff) response)
+newtype Method (m :: Symbol) response
+  = Method (Aff response)
 ```
 
 A `Servable` type constructor which indicates the expected
@@ -106,15 +84,15 @@ method (GET, POST, PUT, etc.) using a type-level string.
 
 ##### Instances
 ``` purescript
-Newtype (Method m eff response) _
-Functor (Method m eff)
-Apply (Method m eff)
-Applicative (Method m eff)
-Bind (Method m eff)
-Monad (Method m eff)
-MonadEff (http :: HTTP | eff) (Method m eff)
-MonadAff (http :: HTTP | eff) (Method m eff)
-(IsSymbol method, IsResponse response) => Servable eff (Method method eff response)
+Newtype (Method m response) _
+Functor (Method m)
+Apply (Method m)
+Applicative (Method m)
+Bind (Method m)
+Monad (Method m)
+MonadEffect (Method m)
+MonadAff (Method m)
+(IsSymbol method, IsResponse response) => Servable (Method method response)
 ```
 
 #### `GET`
@@ -162,7 +140,7 @@ main = quickServe opts echo where
 ##### Instances
 ``` purescript
 Newtype (RequestBody a) _
-(IsRequest request, Servable eff service) => Servable eff (RequestBody request -> service)
+(IsRequest request, Servable service) => Servable (RequestBody request -> service)
 ```
 
 #### `Capture`
@@ -186,20 +164,42 @@ main = quickServe opts echo' where
 ##### Instances
 ``` purescript
 Newtype Capture _
-(Servable eff service) => Servable eff (Capture -> service)
+(Servable service) => Servable (Capture -> service)
+```
+
+#### `quickServe`
+
+``` purescript
+quickServe :: forall server. Servable server => ListenOptions -> server -> Effect Unit
+```
+
+Start a web server given some `Servable` type
+and an implementation of that type.
+
+For example:
+
+```purescript
+opts = { hostname: "localhost"
+       , port: 3000
+       , backlog: Nothing
+       }
+
+main = quickServe opts hello where
+  hello :: GET String
+  hello = pure "Hello, World!""
 ```
 
 #### `ServableList`
 
 ``` purescript
-class ServableList eff (l :: RowList) (r :: # Type) | l -> r where
-  serveListWith :: RLProxy l -> {  | r } -> Request -> Response -> List String -> Maybe (Eff (http :: HTTP | eff) Unit)
+class ServableList (l :: RowList) (r :: # Type) | l -> r where
+  serveListWith :: RLProxy l -> {  | r } -> Request -> Response -> List String -> Maybe (Effect Unit)
 ```
 
 ##### Instances
 ``` purescript
-ServableList eff Nil ()
-(IsSymbol route, Servable eff s, ServableList eff l r1, RowCons route s r1 r) => ServableList eff (Cons route s l) r
+ServableList Nil ()
+(IsSymbol route, Servable s, ServableList l r1, Cons route s r1 r) => ServableList (Cons route s l) r
 ```
 
 

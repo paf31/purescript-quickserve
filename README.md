@@ -9,7 +9,7 @@ Quickly create HTTP servers from functions!
 A single endpoint which returns plain text:
 
 ```purescript
-server :: forall eff. GET eff String
+server :: GET String
 server = pure "Hello, World!"
 
 main = do
@@ -22,7 +22,7 @@ main = do
 Use a function argument with type `RequestBody a` to read the request body:
 
 ```purescript
-server :: forall eff. RequestBody String -> POST eff String
+server :: RequestBody String -> POST String
 server (RequestBody s) = pure s
 ```
 
@@ -34,7 +34,7 @@ respectively. See the [test project](test/Main.purs) for an example.
 
 ## Effects
 
-The `GET`/`POST` monad has instances for `MonadEff` and `MonadAff` to lift
+The `GET`/`POST` monad has instances for `MonadEffect` and `MonadAff` to lift
 synchronous and asynchronous effects.
 
 ## Routing
