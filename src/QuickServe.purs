@@ -206,7 +206,7 @@ instance servableRequestBody
 
         handleData str = (flip Ref.modify_) buffer (_ <> str)
 
-        handleError :: forall e. Error -> Effect Unit
+        handleError :: Error -> Effect Unit
         handleError = sendError res 500 "Internal server error" <<< message
 
         handleEnd = do
