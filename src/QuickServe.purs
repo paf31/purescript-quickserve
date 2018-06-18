@@ -22,33 +22,31 @@ module QuickServe
 import Prelude
 
 import Control.Comonad (extract)
-import Control.Monad.Aff (Aff, runAff)
-import Control.Monad.Aff.Class (class MonadAff)
-import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (class MonadEff)
-import Control.Monad.Eff.Console (CONSOLE, log)
-import Control.Monad.Eff.Exception (Error, catchException, message)
-import Control.Monad.Eff.Ref (modifyRef, newRef, readRef)
-import Control.Monad.Eff.Ref.Unsafe (unsafeRunRef)
-import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
 import Control.Monad.Except (runExcept)
 import Data.Bifunctor (bimap)
 import Data.Either (Either(..), either)
-import Data.Foreign (renderForeignError)
-import Data.Foreign.Class (class Decode, class Encode)
-import Data.Foreign.Generic (decodeJSON, encodeJSON)
 import Data.List (List(..), fromFoldable, (:))
 import Data.Maybe (Maybe(Nothing, Just), maybe)
-import Data.Monoid (mempty)
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Nullable (toMaybe)
-import Data.Record (get)
 import Data.String (split)
 import Data.Symbol (class IsSymbol, SProxy(..), reflectSymbol)
+import Effect (Effect)
+import Effect.Aff (Aff, runAff)
+import Effect.Aff.Class (class MonadAff)
+import Effect.Class (class MonadEffect)
+import Effect.Console (log)
+import Effect.Exception (Error, catchException, message)
+import Effect.Ref as Ref
+import Foreign (renderForeignError)
+import Foreign.Class (class Decode, class Encode)
+import Foreign.Generic (decodeJSON, encodeJSON)
 import Node.Encoding (Encoding(..))
-import Node.HTTP (HTTP, ListenOptions, Request, Response, createServer, listen, requestAsStream, requestMethod, requestURL, responseAsStream, setHeader, setStatusCode, setStatusMessage)
+import Node.HTTP (ListenOptions, Request, Response, createServer, listen, requestAsStream, requestMethod, requestURL, responseAsStream, setHeader, setStatusCode, setStatusMessage)
 import Node.Stream (end, onDataString, onEnd, onError, writeString)
 import Node.URL (parse)
+import Prim.Row (class Cons)
+import Record (get)
 import Type.Proxy (Proxy(..))
 import Type.Row (class RowToList, Cons, Nil, RLProxy(..), kind RowList)
 import Unsafe.Coerce (unsafeCoerce)
@@ -60,13 +58,13 @@ import Unsafe.Coerce (unsafeCoerce)
 -- | defines the method, record types which define routes
 -- | and function types which make things like the request
 -- | body and query parameters available.
-class Servable eff server | server -> eff where
+class Servable server where
   serveWith
     :: server
     -> Request
     -> Response
     -> List String
-    -> Maybe (Eff (http :: HTTP | eff) Unit)
+    -> Maybe (Effect Unit)
 
 -- | Start a web server given some `Servable` type
 -- | and an implementation of that type.
@@ -84,11 +82,11 @@ class Servable eff server | server -> eff where
 -- |   hello = pure "Hello, World!""
 -- | ```
 quickServe
-  :: forall eff server
-   . Servable (console :: CONSOLE | eff) server
+  :: forall server
+   . Servable server
   => ListenOptions
   -> server
-  -> Eff (http :: HTTP, console :: CONSOLE | eff) Unit
+  -> Effect Unit
 quickServe opts serve = do
   server <- createServer \req res -> do
     let url = parse (requestURL req)
@@ -108,7 +106,7 @@ class IsResponse response where
   responseType :: Proxy response -> String
 
 instance isResponseString :: IsResponse String where
-  encodeResponse = id
+  encodeResponse = identity
   responseType _ = "text/plain"
 
 -- | A type class for request data.
@@ -143,17 +141,17 @@ instance isRequestJSON :: Decode a => IsRequest (JSON a) where
 
 -- | A `Servable` type constructor which indicates the expected
 -- | method (GET, POST, PUT, etc.) using a type-level string.
-newtype Method (m :: Symbol) eff response = Method (Aff (http :: HTTP | eff) response)
+newtype Method (m :: Symbol) response = Method (Aff response)
 
-derive instance newtypeMethod :: Newtype (Method m eff response) _
+derive instance newtypeMethod :: Newtype (Method m response) _
 
-derive newtype instance functorMethod :: Functor (Method m eff)
-derive newtype instance applyMethod :: Apply (Method m eff)
-derive newtype instance applicativeMethod :: Applicative (Method m eff)
-derive newtype instance bindMethod :: Bind (Method m eff)
-derive newtype instance monadMethod :: Monad (Method m eff)
-derive newtype instance monadEffMethod :: MonadEff (http :: HTTP | eff) (Method m eff)
-derive newtype instance monadAffMethod :: MonadAff (http :: HTTP | eff) (Method m eff)
+derive newtype instance functorMethod :: Functor (Method m)
+derive newtype instance applyMethod :: Apply (Method m)
+derive newtype instance applicativeMethod :: Applicative (Method m)
+derive newtype instance bindMethod :: Bind (Method m)
+derive newtype instance monadMethod :: Monad (Method m)
+derive newtype instance monadEffectMethod :: MonadEffect (Method m)
+derive newtype instance monadAffMethod :: MonadAff (Method m)
 
 -- | A resource which responds to GET requests.
 type GET = Method "GET"
@@ -166,7 +164,7 @@ type PUT = Method "PUT"
 
 instance servableMethod
     :: (IsSymbol method, IsResponse response)
-    => Servable eff (Method method eff response) where
+    => Servable (Method method response) where
   serveWith respond req res Nil = pure do
     let outputStream = responseAsStream res
 
@@ -198,28 +196,28 @@ newtype RequestBody a = RequestBody a
 derive instance newtypeRequestBody :: Newtype (RequestBody a) _
 
 instance servableRequestBody
-    :: (IsRequest request, Servable eff service)
-    => Servable eff (RequestBody request -> service) where
-  serveWith read req res path = Just $ unsafeRunRef $ void do
-    buffer <- newRef ""
+    :: (IsRequest request, Servable service)
+    => Servable (RequestBody request -> service) where
+  serveWith read req res path = Just $ void do
+    buffer <- Ref.new ""
 
     let inputStream = requestAsStream req
         outputStream = responseAsStream res
 
-        handleData str = modifyRef buffer (_ <> str)
+        handleData str = (flip Ref.modify_) buffer (_ <> str)
 
-        handleError :: forall e. Error -> Eff (http :: HTTP | e) Unit
+        handleError :: Error -> Effect Unit
         handleError = sendError res 500 "Internal server error" <<< message
 
         handleEnd = do
-          body <- readRef buffer
+          body <- Ref.read buffer
           case decodeRequest body of
             Left err ->
               sendError res 400 "Bad Request" err
             Right request ->
               case serveWith (read (RequestBody request)) req res path of
                 Nothing -> badRoute res
-                Just eff -> unsafeCoerceEff eff
+                Just eff -> eff
     catchException handleError do
       onError inputStream handleError
       onDataString inputStream UTF8 handleData
@@ -240,19 +238,18 @@ newtype Capture = Capture String
 derive instance newtypeCapture :: Newtype Capture _
 
 instance servableCapture
-    :: Servable eff service
-    => Servable eff (Capture -> service) where
+    :: Servable service
+    => Servable (Capture -> service) where
   serveWith read req res (part : path) =
     serveWith (read (Capture part)) req res path
   serveWith _ _ _ _ = Nothing
 
 sendError
-  :: forall eff
-   . Response
+  :: Response
   -> Int
   -> String
   -> String
-  -> Eff (http :: HTTP | eff) Unit
+  -> Effect Unit
 sendError res code msg body = do
   let outputStream = responseAsStream res
   setHeader res "Content-Type" "text/plain"
@@ -261,27 +258,27 @@ sendError res code msg body = do
   _ <- writeString outputStream UTF8 body (pure unit)
   end outputStream (pure unit)
 
-badRoute :: forall eff. Response -> Eff (http :: HTTP | eff) Unit
+badRoute :: Response -> Effect Unit
 badRoute res = sendError res 400 "Bad Request" "No such route"
 
-instance servableRecord :: (RowToList r l, ServableList eff l r) => Servable eff (Record r) where
+instance servableRecord :: (RowToList r l, ServableList l r) => Servable (Record r) where
   serveWith r = serveListWith (RLProxy :: RLProxy l) r
 
-class ServableList eff (l :: RowList) (r :: # Type) | l -> r where
+class ServableList (l :: RowList) (r :: # Type) | l -> r where
   serveListWith
     :: RLProxy l
     -> Record r
     -> Request
     -> Response
     -> List String
-    -> Maybe (Eff (http :: HTTP | eff) Unit)
+    -> Maybe (Effect Unit)
 
-instance servableListNil :: ServableList eff Nil () where
+instance servableListNil :: ServableList Nil () where
   serveListWith _ _ _ _ _ = Nothing
 
 instance servableListCons
-  :: (IsSymbol route, Servable eff s, ServableList eff l r1, RowCons route s r1 r)
-  => ServableList eff (Cons route s l) r where
+  :: (IsSymbol route, Servable s, ServableList l r1, Cons route s r1 r)
+  => ServableList (Cons route s l) r where
   serveListWith _ rec req res (actual : xs)
     | actual == reflectSymbol (SProxy :: SProxy route)
     = serveWith (get (SProxy :: SProxy route) rec :: s) req res xs
